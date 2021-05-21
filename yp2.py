@@ -216,17 +216,15 @@ def main():
 
             cmds = ['enable 2',
                     'enable 3',
-                    'watch next_instr']
+                    ]
             cmds += [f'enable {brk_id}' for line, brk_id in dispatch_brk_ids.items()]
             res = rr.write(cmds, timeout_sec=100)
-            pprint(res)
+#            pprint(res)
         elif ((r['payload']['bkpt']['original-location'] == FAST_NEXT_OPCODE)
                 or (int(r['payload']['bkpt']['number']) in dispatch_brk_ids.values())
-                or (r['message'] == 'breakpoint-modified'
-                 and r['payload']['bkpt']['disp'] == 'keep'
-                 and r['payload']['bkpt']['original-location'] == 'next_instr')):
+                ):
             f_lasti = next_instr[-1] - first_instr[-1]
-            print(bcolors.OKGREEN + f'running next_instr (f_lasti = {f_lasti})...' + bcolors.ENDC)
+            print(bcolors.OKGREEN + f'running next_instr (f_lasti={f_lasti}, instr_lb={instr_lb[-1]}, instr_ub={instr_ub[-1]})...' + bcolors.ENDC)
 #            pprint(res)
             try:
                 next_instr[-1] = get_next_instr(rr)
@@ -237,18 +235,18 @@ def main():
 
             # If the last instruction executed isn't in the current
             # instruction window, reset the window.
-            #if f_lasti < instr_lb[-1] or f_lasti >= instr_ub[-1]:
-            lineno, instr_lb[-1], instr_ub[-1] = get_lineno(rr, code[-1], f_lasti)
+            if f_lasti < instr_lb[-1] or f_lasti >= instr_ub[-1]:
+                lineno, instr_lb[-1], instr_ub[-1] = get_lineno(rr, code[-1], f_lasti)
 
             # If the last instruction falls at the start of a line or if
             # it represents a jump backwards, update the frame's line
             # number and call the trace function.
-            #if f_lasti == instr_lb[-1] or f_lasti < instr_prev[-1]:
-            print(bcolors.OKGREEN + f'Got {filename[-1]}:{name[-1]}:{lineno}' + bcolors.ENDC)
+            if f_lasti == instr_lb[-1] or f_lasti < instr_prev[-1]:
+                print(bcolors.OKGREEN + f'Got {filename[-1]}:{name[-1]}:{lineno}' + bcolors.ENDC)
 
             instr_prev[-1] = f_lasti
         elif r['payload']['bkpt']['original-location'] == END_FRAME:
-            print(bcolors.OKGREEN + 'pop stack')
+            print(bcolors.OKGREEN + 'pop stack' + bcolors.ENDC)
             code.pop()
             first_instr.pop()
             next_instr.pop()
@@ -257,6 +255,15 @@ def main():
             instr_lb.pop()
             instr_ub.pop()
             instr_prev.pop()
+            
+            if len(code) == 0:
+                cmds = ['disable 2',
+                        'disable 3',
+                        ]
+                cmds += [f'disable {brk_id}' for line, brk_id in dispatch_brk_ids.items()]
+                res = rr.write(cmds, timeout_sec=100)
+                pprint(res)
+                
     rr.exit()
     
 
