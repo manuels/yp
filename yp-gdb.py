@@ -28,16 +28,26 @@ def gdb_command(name, cmd_class, completer_class=gdb.COMPLETE_NONE):
         return instance
     return func
 
+
+def get_exec_direction():
+    direction = gdb.execute('show exec-direction', from_tty=False, to_string=True).strip()
+    if direction == 'Forward.':
+        return 'forward'
+    elif direction == 'Reverse.':
+        return 'reverse'
+    else:
+        raise Exception(f'Unknown exec-direction {repr(direction)}')
+
     
 @contextlib.contextmanager
 def exec_direction_forward():
-    direction = gdb.execute('show exec-direction', from_tty=False, to_string=True).strip()
-    if direction != 'Forward.':
-        direction = gdb.execute('set exec-direction forward', from_tty=False, to_string=True)
+    direction = get_exec_direction()
+    if direction != 'forward':
+        gdb.execute('set exec-direction forward', from_tty=False, to_string=True)
 
     yield        
 
-    if direction == 'Reverse.':
+    if direction == 'reverse':
         gdb.execute(f'set exec-direction reverse', from_tty=False, to_string=True)
 
 
@@ -55,6 +65,23 @@ class NextInstrOptimizationWarning(RuntimeWarning):
     pass
     
 warnings.simplefilter('once', NextInstrOptimizationWarning)
+
+
+def get_pygdb_selected_frame():
+    _gdbframe = gdb.selected_frame()
+    if _gdbframe:
+        return Frame(_gdbframe)
+    return None
+
+
+@gdb_command("py-foo", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
+def invoke(cmd, args, from_tty):
+    print(get_pygdb_selected_frame())
+    print(get_pygdb_selected_frame().get_pyop())
+    pyop = get_pygdb_selected_frame().get_pyop()
+    filename = pyop.filename()
+    lineno = pyop.current_line_num()
+    print(f'{filename}#{lineno}')
 
 
 class StackFrame:
@@ -132,6 +159,7 @@ class EndStackFrameBreakpoint(gdb.Breakpoint):
 
     def stop(self):
         log.debug(f'stop EndStackFrameBreakpoint depth={len(STACK)}')
+        log.info('get_pygdb_selected_frame', get_pygdb_selected_frame().get_pyop())
         if STACK:
             STACK.pop()
 
@@ -202,10 +230,11 @@ class UserInitStackFrameBreakpoint(ConditionalBreakpoint):
 
         brk_args = [gdb.BP_BREAKPOINT, 0, True]
 
-        init_frame_brk = InitStackFrameBreakpoint(INIT_FRAME_LINE, *brk_args)
-        next_instr_brk_list = [NextInstrBreakpoint(position, *brk_args) for position in CASE_TARGET_LIST]
-        cleanup = [init_frame_brk] + next_instr_brk_list
-        end_frame_brk = EndStackFrameBreakpoint(cleanup, END_FRAME_LINE, *brk_args)
+        if len(STACK) == 1:
+            init_frame_brk = InitStackFrameBreakpoint(INIT_FRAME_LINE, *brk_args)
+            next_instr_brk_list = [NextInstrBreakpoint(position, *brk_args) for position in CASE_TARGET_LIST]
+            cleanup = [init_frame_brk] + next_instr_brk_list
+            end_frame_brk = EndStackFrameBreakpoint(cleanup, END_FRAME_LINE, *brk_args)
 
         gdb.execute('py-bt')
 
