@@ -2,6 +2,7 @@ from pathlib import Path
 import warnings
 import logging
 import functools
+import contextlib
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -26,6 +27,26 @@ def gdb_command(name, cmd_class, completer_class=gdb.COMPLETE_NONE):
         instance = cls(name, cmd_class, )
         return instance
     return func
+
+    
+@contextlib.contextmanager
+def exec_direction_forward():
+    direction = gdb.execute('show exec-direction', from_tty=False, to_string=True).strip()
+    if direction != 'Forward.':
+        direction = gdb.execute('set exec-direction forward', from_tty=False, to_string=True)
+
+    yield        
+
+    if direction == 'Reverse.':
+        gdb.execute(f'set exec-direction reverse', from_tty=False, to_string=True)
+
+
+@contextlib.contextmanager
+def malloc(something):
+    with exec_direction_forward():
+        ptr = int(gdb.parse_and_eval(f'malloc({something})'))
+        yield ptr
+        gdb.execute(f'call free({ptr})', from_tty=False, to_string=True)
 
 
 STACK = []
@@ -71,23 +92,15 @@ class StackFrame:
         return self._lineno
 
     def update_lineno(self):
-        direction = gdb.execute('show exec-direction', from_tty=False, to_string=True).strip()
-        if direction != 'Forward.':
-            direction = gdb.execute('set exec-direction forward', from_tty=False, to_string=True)
-        
-        bounds = int(gdb.parse_and_eval('malloc(sizeof(PyAddrPair))'))
-        int(gdb.parse_and_eval(f'(((PyAddrPair *) {bounds}).ap_lower) = 0'))
-        int(gdb.parse_and_eval(f'(((PyAddrPair *) {bounds}).ap_upper) = 0'))
+        with malloc('sizeof(PyAddrPair)') as bounds:
+            int(gdb.parse_and_eval(f'(((PyAddrPair *) {bounds}).ap_lower) = 0'))
+            int(gdb.parse_and_eval(f'(((PyAddrPair *) {bounds}).ap_upper) = 0'))
 
-        self._lineno = int(gdb.parse_and_eval(f'_PyCode_CheckLineNumber({self.code}, {self.lasti}, {bounds})'))
+            self._lineno = int(gdb.parse_and_eval(f'_PyCode_CheckLineNumber({self.code}, {self.lasti}, {bounds})'))
 
-        self.instr_lb = int(gdb.parse_and_eval(f'((PyAddrPair *) {bounds}).ap_lower'))
-        self.instr_ub = int(gdb.parse_and_eval(f'((PyAddrPair *) {bounds}).ap_upper'))
+            self.instr_lb = int(gdb.parse_and_eval(f'((PyAddrPair *) {bounds}).ap_lower'))
+            self.instr_ub = int(gdb.parse_and_eval(f'((PyAddrPair *) {bounds}).ap_upper'))
 
-        gdb.execute(f'call free({bounds})', from_tty=False, to_string=True)
-
-        if direction == 'Reverse.':
-            gdb.execute(f'set exec-direction reverse', from_tty=False, to_string=True)
 
     def __repr__(self):
         return f'StackFrame<{self.filename}#{self.lineno} {self.func} lasti={self.lasti}>'
@@ -190,10 +203,9 @@ class UserInitStackFrameBreakpoint(ConditionalBreakpoint):
         brk_args = [gdb.BP_BREAKPOINT, 0, True]
 
         init_frame_brk = InitStackFrameBreakpoint(INIT_FRAME_LINE, *brk_args)
-
         next_instr_brk_list = [NextInstrBreakpoint(position, *brk_args) for position in CASE_TARGET_LIST]
-
-        end_frame_brk = EndStackFrameBreakpoint([init_frame_brk] + next_instr_brk_list, END_FRAME_LINE, *brk_args)
+        cleanup = [init_frame_brk] + next_instr_brk_list
+        end_frame_brk = EndStackFrameBreakpoint(cleanup, END_FRAME_LINE, *brk_args)
 
         gdb.execute('py-bt')
 
