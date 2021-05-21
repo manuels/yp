@@ -12,15 +12,15 @@ def g():
 
 def main():
   y = 2
-  y += 2
+  y = y + 1
   print(0)
-  y += 2
+  y = y + 2
   f()
-  y += 2
+  y = y + 3
   print(1)
-  y += 1
+  y = y + 4
   g()
-  y += 1
+  y = y + 5
   print(y)
 
 
