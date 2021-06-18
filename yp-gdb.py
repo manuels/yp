@@ -5,9 +5,9 @@ import functools
 import contextlib
 
 log = logging.getLogger(__name__)
-#log.setLevel(logging.INFO)
-log.setLevel(logging.DEBUG)
-log.debug = print
+log.setLevel(logging.INFO)
+#log.setLevel(logging.DEBUG)
+#log.debug = print
 
 INIT_FRAME_LINE = '../Python/ceval.c:1324'
 END_FRAME_LINE = '../Python/ceval.c:3844'
@@ -78,12 +78,12 @@ def get_pygdb_selected_frame():
 
 @gdb_command("py-foo", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
-    print(get_pygdb_selected_frame())
-    print(get_pygdb_selected_frame().get_pyop())
+#    print(get_pygdb_selected_frame())
+#    print(get_pygdb_selected_frame().get_pyop())
     pyop = get_pygdb_selected_frame().get_pyop()
     filename = pyop.filename()
     lineno = pyop.current_line_num()
-    print(f'{filename}#{lineno}')
+#    print(f'{filename}:{lineno}')
 
 
 class StackFrame:
@@ -122,17 +122,20 @@ class StackFrame:
         # it represents a jump backwards, update the frame's line
         # number and call the trace function.
 
-        # TODO: adjust for reverse debugging
-        return lasti == self.instr_lb or lasti < self.instr_prev
+        #print(get_exec_direction())
+        if get_exec_direction() == 'forward':
+            return lasti == self.instr_lb or lasti < self.instr_prev
+        else:
+            #print(f'lasti = {lasti}, instr_ub = {self.instr_ub}, instr_lb={self.instr_lb}, instr_prev={self.instr_prev}')
+            return lasti == self.instr_lb or lasti >= self.instr_ub
 
     @property
     def lineno(self):
         # If the last instruction executed isn't in the current
         # instruction window, reset the window.
 
-        # TODO: adjust for reverse debugging
-#        if self.lasti < self.instr_lb or self.lasti >= self.instr_ub:
-        self.update_lineno()
+        if self.lasti < self.instr_lb or self.lasti >= self.instr_ub:
+            self.update_lineno()
         return self._lineno
 
     def update_lineno(self):
@@ -147,7 +150,7 @@ class StackFrame:
 
 
     def __repr__(self):
-        return f'StackFrame<{self.filename}#{self.lineno} {self.func} lasti={self.lasti} nexti={self.next_instr:#x} firsti={self.first_instr:#x}>'
+        return f'StackFrame<{self.filename}:{self.lineno} {self.func} lasti={self.lasti} nexti={self.next_instr:#x} firsti={self.first_instr:#x}>'
 
     def update_instr(self):
         next_instr_expr = gdb.parse_and_eval('next_instr')
@@ -159,7 +162,8 @@ class StackFrame:
             _, (symtab_and_line,) = gdb.decode_line()
             fn = symtab_and_line.symtab.filename
             fn_lineno = symtab_and_line.line
-            warnings.warn(f'next_instr is optimized out in {fn}#{fn_lineno}', NextInstrOptimizationWarning)
+            #warnings.warn(f'next_instr is optimized out in {fn}:{fn_lineno}', NextInstrOptimizationWarning)
+            log.warning(f'next_instr is optimized out in {fn}:{fn_lineno}')
 
 
 def gdb_breakpoint(func_or_line, cls=gdb.Breakpoint):
@@ -181,7 +185,7 @@ def gdb_breakpoint(func_or_line, cls=gdb.Breakpoint):
 
 class InitStackFrameBreakpoint(gdb.Breakpoint):
     def __init__(self, brk_list, *args):
-        print(INIT_FRAME_LINE, *args)
+        log.debug(INIT_FRAME_LINE, *args)
         gdb.Breakpoint.__init__(self, INIT_FRAME_LINE, *args)
         self.brk_list = brk_list
 
@@ -205,7 +209,7 @@ def leave_frame(self_brk, brk_list):
     if STACK:
         STACK.pop()
 
-    print(f'leave_frame depth={len(STACK)}')
+    log.debug(f'leave_frame depth={len(STACK)}')
 
     if not STACK:
         for brk in brk_list:
@@ -246,7 +250,7 @@ class ConditionalBreakpoint(gdb.Breakpoint):
 
 
 def ceval_case_target_lines():
-    contents = Path('/tmp/ceval.c').read_text().splitlines()
+    contents = (Path(__file__).parent / 'ceval-py392.c').read_text().splitlines()
     lines = [l for i, l in enumerate(contents)]
     lineno_list = [i + 1 for i, l in enumerate(contents) if r'case TARGET(' in l]
     assert len(lineno_list) > 0
@@ -267,7 +271,7 @@ def NextInstrBreakpoint(brk):
     lasti = frame.lasti
     frame.update_instr()
 
-    if frame.is_at_new_line(lasti) and STEP_MODE == 'line':
+    if frame.is_at_new_line(lasti) and STEP_MODE == 'step':
         gdb.execute('py-bt')
         STEP_MODE = None
         ret = True
@@ -302,30 +306,41 @@ def UserInitStackFrameBreakpoint(brk):
     return True
 
 
-@gdb_command("py-break", gdb.COMMAND_BREAKPOINTS, gdb.COMPLETE_NONE)
+@gdb_command("py-break", gdb.COMMAND_BREAKPOINTS, gdb.COMPLETE_LOCATION)
 def invoke(cmd, args, from_tty):
-    filename = '/home/manuel/Projects/yp/test_script.py'
-    func = 'main'
-    
+    try:
+        filename, location = args.rsplit(':')
+    except ValueError:
+        gdb.write('Expected py-break <script_file:lineno/function>\n')
+        return
+
     where = f'$_streq({gdb_escape(filename)}, {py_string("co.co_filename")})'
-    where += f' && $_streq({gdb_escape(func)}, {py_string("co.co_name")})'
+    
+    try:
+        lineno = int(location)
+    except ValueError:
+        func = location        
+        where += f' && $_streq({gdb_escape(func)}, {py_string("co.co_name")})'
+    else:
+        gdb.write('py-break only accepts function names (and no line numbers) right now.\n')
+        return
 
     brk = UserInitStackFrameBreakpoint(where)
 
 
-@gdb_command("py-next", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
+@gdb_command("py-step", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
     global STEP_MODE
-    STEP_MODE = 'line'
+    STEP_MODE = 'step'
     gdb.execute('continue')
 
 
-@gdb_command("py-reverse-next", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
+@gdb_command("py-reverse-step", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
     global STEP_MODE
-    STEP_MODE = 'line'
+    STEP_MODE = 'step'
     gdb.execute('reverse-continue')
 
 
-gdb.execute('py-break')
+#gdb.execute('py-break')
 

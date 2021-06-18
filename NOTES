@@ -3,6 +3,7 @@ _PyEval_EvalFrameDefault
 
 rr record python3.9 test_script.py
 rr replay
+rr replay --gdb-x yp-gdb.py
 
 break _PyEval_EvalFrameDefault
 p f.f_code.co_filename
