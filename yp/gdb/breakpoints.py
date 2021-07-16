@@ -1,3 +1,4 @@
+import collections
 from pathlib import Path
 
 import logging
@@ -109,3 +110,13 @@ class ConditionalBreakpoint(gdb.Breakpoint):
         else:
             return True
 '''
+
+
+class BreakpointGroup(collections.UserList):
+    def enable(self):
+        for brk in self:
+            brk.enabled = True
+
+    def disable(self):
+        for brk in self:
+            brk.enabled = False
