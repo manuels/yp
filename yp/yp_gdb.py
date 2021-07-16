@@ -311,7 +311,7 @@ def invoke(cmd, args, from_tty):
 
     brk = UserInitStackFrameBreakpoint(where)
 
-
+'''
 @gdb_command("py-step-old", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
     global STEP_MODE
@@ -346,7 +346,7 @@ def invoke(cmd, args, from_tty):
     global STEP_MODE
     STEP_MODE = 'step'
     gdb.execute('reverse-continue')
-
+'''
 
 import yp.cmd_stepi
 import yp.cmd_step
