@@ -104,16 +104,3 @@ def invoke(cmd, args, from_tty):
     STEP_MODE = 'step'
     gdb.execute('reverse-continue')
 '''
-
-# TODOs
-# [ ] break at line
-# [x] stepi
-# [x] step
-# [ ] finish
-# [ ] next
-# [ ] better stack handling
-# [ ] rstep
-# [ ] rnext
-# [ ] py-break autocompletion
-
-
