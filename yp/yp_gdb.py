@@ -1,65 +1,24 @@
+import dataclasses
+from collections import OrderedDict
 from pathlib import Path
 import warnings
 import logging
 import functools
 import contextlib
+import enum
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 #log.setLevel(logging.DEBUG)
 #log.debug = print
 
-INIT_FRAME_LINE = '../Python/ceval.c:1324'
-END_FRAME_LINE = '../Python/ceval.c:3844'
+INIT_FRAME_LINE = '../Python/ceval.c:1324'  # in _PyEval_EvalFrameDefault: next_instr = first_instr;
+END_FRAME_LINE = '../Python/ceval.c:3844'   # in _PyEval_EvalFrameDefault: tstate->frame = f->f_back;
 
-# rr replay --gdb-x yp-gdb.py
-
-
-def py_string(obj):
-    return f'((char *) (((PyASCIIObject *) {obj}) + 1))'
-
-
-def gdb_escape(s):
-    return f'"{s}"'
-
-
-def gdb_command(name, cmd_class, completer_class=gdb.COMPLETE_NONE):
-    def func(func):
-        cls = type(func.__name__, (gdb.Command, ), dict(invoke=func))
-        instance = cls(name, cmd_class, )
-        return instance
-    return func
-
-
-def get_exec_direction():
-    direction = gdb.execute('show exec-direction', from_tty=False, to_string=True).strip()
-    if direction == 'Forward.':
-        return 'forward'
-    elif direction == 'Reverse.':
-        return 'reverse'
-    else:
-        raise Exception(f'Unknown exec-direction {repr(direction)}')
-
-    
-@contextlib.contextmanager
-def exec_direction_forward():
-    direction = get_exec_direction()
-    if direction != 'forward':
-        gdb.execute('set exec-direction forward', from_tty=False, to_string=True)
-
-    yield        
-
-    if direction == 'reverse':
-        gdb.execute(f'set exec-direction reverse', from_tty=False, to_string=True)
-
-
-@contextlib.contextmanager
-def malloc(something):
-    with exec_direction_forward():
-        ptr = int(gdb.parse_and_eval(f'malloc({something})'))
-        yield ptr
-        gdb.execute(f'call free({ptr})', from_tty=False, to_string=True)
-
+import yp
+gdb = yp.gdb
+gdbenv = yp.gdbenv
+from yp.gdb_utils import *
 
 STACK = []
 
@@ -72,10 +31,11 @@ warnings.simplefilter('once', NextInstrOptimizationWarning)
 def get_pygdb_selected_frame():
     _gdbframe = gdb.selected_frame()
     if _gdbframe:
-        return Frame(_gdbframe)
+        return yp.gdbenv.Frame(_gdbframe)
     return None
 
 
+"""
 @gdb_command("py-foo", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
 #    print(get_pygdb_selected_frame())
@@ -84,25 +44,40 @@ def invoke(cmd, args, from_tty):
     filename = pyop.filename()
     lineno = pyop.current_line_num()
 #    print(f'{filename}:{lineno}')
+"""
 
 
-class StackFrame:
-    def __init__(self):
-        gdb.execute('up')  # f might be optimized out, but it is still there in the parent frame
+@dataclasses.dataclass
+class PyStackFrame:
+    class NoActiveFrame(Exception):
+        pass
 
-        self.code = int(gdb.parse_and_eval('f.f_code'))
-        lasti = int(gdb.parse_and_eval('f.f_lasti'))
-        
+    code: int
+    first_instr: int
+    filename: str
+    func: str
+
+    next_instr: int
+    instr_lb: int
+    instr_ub: int
+    instr_prev: int
+
+    def __init__(self, values=None):
+        if values is None:
+            with frame_up():
+                self.code = int(gdb.parse_and_eval('f.f_code'))
+                lasti = int(gdb.parse_and_eval('f.f_lasti'))
+                self.filename = str(gdb.parse_and_eval('f.f_code.co_filename'))
+                self.func = str(gdb.parse_and_eval('f.f_code.co_name'))
+        else:
+            self.code, lasti, self.filename, self.func = values
+
         q = f'(((PyCodeObject *)({self.code}))->co_code)'
         q = f'(((PyBytesObject *)({q}))->ob_sval)'
         q = f'((_Py_CODEUNIT *) {q})'
         self.first_instr = int(gdb.parse_and_eval(q))
-        self.filename = str(gdb.parse_and_eval('f.f_code.co_filename'))
-        self.func = str(gdb.parse_and_eval('f.f_code.co_name'))
 
-        gdb.execute('down')
-
-        if get_exec_direction() == 'forward':
+        if ExecDirection.get_exec_direction() == ExecDirection.FORWARD:
             self.next_instr = self.first_instr
             self.instr_lb = lasti
             self.instr_ub = lasti
@@ -113,6 +88,14 @@ class StackFrame:
             self.instr_ub = -1
             self.instr_prev = -1
 
+    @classmethod
+    def from_py_frame_object_ptr(cls, py_frame):
+        code = py_frame.co.as_address()
+        lasti = py_frame.f_lasti
+        filename = py_frame.co_filename
+        func = py_frame.co_name
+        return cls(values=(code, lasti, filename, func))
+
     @property
     def lasti(self):
         return self.next_instr - self.first_instr
@@ -122,11 +105,11 @@ class StackFrame:
         # it represents a jump backwards, update the frame's line
         # number and call the trace function.
 
-        #print(get_exec_direction())
-        if get_exec_direction() == 'forward':
-            return lasti == self.instr_lb or lasti < self.instr_prev
+        print(f'lasti = {lasti}, instr_ub = {self.instr_ub}, instr_lb={self.instr_lb}, instr_prev={self.instr_prev}')
+        if ExecDirection.get_exec_direction() == ExecDirection.FORWARD:
+            #return lasti == self.instr_lb or lasti < self.instr_prev
+            return lasti >= self.instr_lb or lasti < self.instr_prev
         else:
-            #print(f'lasti = {lasti}, instr_ub = {self.instr_ub}, instr_lb={self.instr_lb}, instr_prev={self.instr_prev}')
             return lasti == self.instr_lb or lasti >= self.instr_ub
 
     @property
@@ -161,7 +144,7 @@ class StackFrame:
         else:
             _, (symtab_and_line,) = gdb.decode_line()
             fn = symtab_and_line.symtab.filename
-            fn_lineno = symtab_and_line.line
+            fn_lineno = symtab_and_line.f_lineno
             #warnings.warn(f'next_instr is optimized out in {fn}:{fn_lineno}', NextInstrOptimizationWarning)
             log.warning(f'next_instr is optimized out in {fn}:{fn_lineno}')
 
@@ -193,7 +176,7 @@ class InitStackFrameBreakpoint(gdb.Breakpoint):
         log.debug(f'stop InitStackFrameBreakpoint depth={len(STACK)} {STACK[-1] if len(STACK) else ""}')
 
         # TODO: replace by change_frame(self, self.brk_list)
-        if get_exec_direction() == 'forward':
+        if ExecDirection.get_exec_direction() == ExecDirection.FORWARD:
             enter_frame()
         else:
             leave_frame(self, self.brk_list)
@@ -202,7 +185,7 @@ class InitStackFrameBreakpoint(gdb.Breakpoint):
 
 
 def enter_frame():
-    STACK.append(StackFrame())
+    STACK.append(PyStackFrame())
 
 
 def leave_frame(self_brk, brk_list):
@@ -227,7 +210,7 @@ class EndStackFrameBreakpoint(gdb.Breakpoint):
         log.debug(f'stop EndStackFrameBreakpoint depth={len(STACK)}')
         log.info('get_pygdb_selected_frame', get_pygdb_selected_frame().get_pyop())
 
-        if get_exec_direction() == 'forward':
+        if ExecDirection.get_exec_direction() == ExecDirection.FORWARD:
             leave_frame(self, self.brk_list)
         else:
             # TODO raise NotImplemented('What to do in reverse direction here?')
@@ -256,29 +239,41 @@ def ceval_case_target_lines():
     assert len(lineno_list) > 0
     return lineno_list
 
-
+# these `case` statements are all in _PyEval_EvalFrameDefault:
 CASE_TARGET_LIST = [f'../Python/ceval.c:{lineno}' for lineno in ceval_case_target_lines()]
 
 
 STEP_MODE = None
 
+
+if False:
+    def get_current_pyframe():
+        return STACK[-1]
+else:
+    def get_current_pyframe():
+        frame: gdbenv.PyFrameObjectPtr = gdbenv.Frame.get_selected_python_frame().get_pyop()
+        return PyStackFrame.from_py_frame_object_ptr(frame)
+
+
 @gdb_breakpoint
 def NextInstrBreakpoint(brk):
     global STEP_MODE
-    frame = STACK[-1]
+    frame = get_current_pyframe()
     ret = False
 
     lasti = frame.lasti
     frame.update_instr()
 
-    if frame.is_at_new_line(lasti) and STEP_MODE == 'step':
-        gdb.execute('py-bt')
+    at_new_line = frame.is_at_new_line(frame.lasti)
+    if at_new_line and STEP_MODE == 'step':
+        #gdb.execute('py-bt')
         STEP_MODE = None
         ret = True
     if STEP_MODE == 'op':
         STEP_MODE = None
         ret = True
 
+    print(f'stop NextInstrBreakpoint {frame} at_new_line={at_new_line}, mode={STEP_MODE}')
     log.debug(f'stop NextInstrBreakpoint {frame}')
     return ret
 
@@ -288,18 +283,7 @@ def UserInitStackFrameBreakpoint(brk):
     if not brk.should_stop():
         return False
 
-    STACK.append(StackFrame())
-    log.debug(f'stop UserInitStackFrameBreakpoint depth={len(STACK)} {STACK[-1]}')
-
-    brk_args = [gdb.BP_BREAKPOINT, 0, True]
-
-    if len(STACK) == 1:
-        cleanup_list = []
-        init_frame_brk = InitStackFrameBreakpoint(cleanup_list, *brk_args)
-        next_instr_brk_list = [NextInstrBreakpoint(position, *brk_args) for position in CASE_TARGET_LIST]
-        end_frame_brk = EndStackFrameBreakpoint(cleanup_list, *brk_args)
-
-        cleanup_list += [init_frame_brk, end_frame_brk] + next_instr_brk_list
+    log.debug(f'stop UserInitStackFrameBreakpoint depth={len(STACK)} {get_current_pyframe()}')
 
     gdb.execute('py-bt')
 
@@ -309,7 +293,7 @@ def UserInitStackFrameBreakpoint(brk):
 @gdb_command("py-break", gdb.COMMAND_BREAKPOINTS, gdb.COMPLETE_LOCATION)
 def invoke(cmd, args, from_tty):
     try:
-        filename, location = args.rsplit(':')
+        filename, location = args.rstrip().rsplit(':')
     except ValueError:
         gdb.write('Expected py-break <script_file:lineno/function>\n')
         return
@@ -328,19 +312,55 @@ def invoke(cmd, args, from_tty):
     brk = UserInitStackFrameBreakpoint(where)
 
 
-@gdb_command("py-step", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
+@gdb_command("py-step-old", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
     global STEP_MODE
     STEP_MODE = 'step'
+
+    try:
+        frame = PyStackFrame()
+    except PyStackFrame.NoActiveFrame:
+        gdb.write('No active python frame!\n')  # TODO set breakpoint and wait until we have one
+        return
+
+    STACK.append(frame)
+
+    brk_args = OrderedDict(type=gdb.BP_BREAKPOINT,
+                           wp_class=gdb.WP_WRITE,
+                           internal=True,
+                           temporary=True)
+
+    if len(STACK) == 1:
+        cleanup_list = []
+        init_frame_brk = InitStackFrameBreakpoint(cleanup_list, *brk_args.values())
+        next_instr_brk_list = [NextInstrBreakpoint(position, *brk_args.values()) for position in CASE_TARGET_LIST]
+        end_frame_brk = EndStackFrameBreakpoint(cleanup_list, *brk_args.values())
+
+        cleanup_list += [init_frame_brk, end_frame_brk] + next_instr_brk_list
+
     gdb.execute('continue')
 
 
-@gdb_command("py-reverse-step", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
+@gdb_command("py-reverse-step-old", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
     global STEP_MODE
     STEP_MODE = 'step'
     gdb.execute('reverse-continue')
 
 
-#gdb.execute('py-break')
+import yp.cmd_stepi
+import yp.cmd_step
+
+
+# TODOs
+# [ ] break at line
+# [x] stepi
+# [x] step
+# [ ] finish
+# [ ] next
+# [ ] better stack handling
+# [ ] rstep
+# [ ] rnext
+# [ ] py-break autocompletion
+
 

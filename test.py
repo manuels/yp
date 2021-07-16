@@ -8,7 +8,7 @@ PROMPT = '\(rr\) '
 class RRProcess:
     def __init__(self):
         args = '-o "-ex=set style enabled off"'
-        self.rr = pexpect.spawn(f'rr replay --gdb-x yp-gdb.py {args}', timeout=3)
+        self.rr = pexpect.spawn(f'rr replay --gdb-x yp/main.py {args}', timeout=3)
         self.rr.expect('--Type <RET> for more, q to quit, c to continue without paging--')
         self.rr.sendline('')
         self.rr.expect(PROMPT)
@@ -36,31 +36,41 @@ class RRProcess:
     def py_rnext(self):
         self.rr.sendline('py-reverse-next')
 
+    def py_step(self):
+        self.rr.sendline('py-step')
+
+    def py_rstep(self):
+        self.rr.sendline('py-reverse-step')
+
 
 def main():
     rr = RRProcess()
-    rr.py_break('/home/manuel/Projects/yp/test_script.py:main')
-    rr.cont()
+    try:
+        rr.py_break('/home/manuel/Projects/yp/test_script.py:main')
+        rr.cont()
 
-    rr.py_bt()
-    expect = '''Traceback \(most recent call first\):
+        rr.py_bt()
+        expect = '''Traceback \(most recent call first\):
   File "/home/manuel/Projects/yp/test_script.py", line 13, in main
     def main\(\):
   File "/home/manuel/Projects/yp/test_script.py", line 28, in <module>
     main\(\)'''
-    for line in expect.splitlines():
-        i = rr.rr.expect([line, PROMPT])
-        assert i == 0
+        for line in expect.splitlines():
+            i = rr.rr.expect([line, PROMPT])
+            assert i == 0
 
-    for line in 14, 15:
-        rr.py_next()
-        rr.rr.expect(f'  File "/home/manuel/Projects/yp/test_script.py", line {line}, in main')
+        for line in 14, 15:
+            rr.py_step()
+            rr.rr.expect(f'  File "/home/manuel/Projects/yp/test_script.py", line {line}, in main')
+            rr.rr.expect(PROMPT)
+
+        rr.py_rstep()
+        rr.rr.expect(f'  File "/home/manuel/Projects/yp/test_script.py", line 14, in main')
         rr.rr.expect(PROMPT)
-
-    rr.py_rnext()
-    rr.rr.expect(f'  File "/home/manuel/Projects/yp/test_script.py", line 14, in main')
-    rr.rr.expect(PROMPT)
-
+    except Exception:
+        print(repr(rr.rr.before.decode()))
+        print(repr(rr.rr.after.decode()))
+        raise
 
     print(rr.rr.before.decode())
     rr.rr.interact()
