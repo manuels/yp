@@ -2,7 +2,8 @@ import contextlib
 import enum
 
 import yp
-gdb = yp.gdb
+import gdb
+
 
 def py_string(obj):
     return f'((char *) (((PyASCIIObject *) {obj}) + 1))'

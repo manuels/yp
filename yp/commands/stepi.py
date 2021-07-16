@@ -1,5 +1,9 @@
-from yp.gdb_utils import gdb, gdb_command
-from yp.yp_gdb import gdb, log, CASE_TARGET_LIST
+import gdb
+import logging
+log = logging.getLogger(__name__)
+
+from yp.gdb.utils import gdb_command
+from yp.yp_gdb import CASE_TARGET_LIST
 
 
 class NextInstrBreakpoint(gdb.Breakpoint):

@@ -14,3 +14,5 @@ if __name__ == '__main__':
         if not k.startswith('__'):
             setattr(yp.gdbenv, k, v)
     from yp.yp_gdb import *
+    import yp.commands.step
+    import yp.commands.stepi

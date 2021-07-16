@@ -1,9 +1,9 @@
-import dataclasses
 import sys
 
 import yp
-from yp.gdb_utils import gdb_command, malloc, ExecDirection
-from yp.yp_gdb import gdb, CASE_TARGET_LIST, INIT_FRAME_LINE, END_FRAME_LINE
+from yp.gdb.utils import gdb_command, malloc, ExecDirection
+from yp.yp_gdb import gdb, CASE_TARGET_LIST
+from yp.gdb.breakpoints import INIT_FRAME_LINE, END_FRAME_LINE
 
 gdbenv = yp.gdbenv
 
