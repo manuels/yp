@@ -1,9 +1,9 @@
 import sys
+import gdb
 
 import yp
 from yp.gdb.utils import gdb_command, malloc, ExecDirection
-from yp.yp_gdb import gdb, CASE_TARGET_LIST
-from yp.gdb.breakpoints import INIT_FRAME_LINE, END_FRAME_LINE
+from yp.gdb.breakpoints import INIT_FRAME_LINE, END_FRAME_LINE, CASE_TARGET_LIST
 
 gdbenv = yp.gdbenv
 
@@ -58,12 +58,13 @@ def is_at_new_line():
 
 
 class NextInstrBreakpoint(gdb.Breakpoint):
-    def __init__(self, location):
+    def __init__(self, location, breakpoints):
         gdb.Breakpoint.__init__(self,
                                 location,
                                 type=gdb.BP_BREAKPOINT,
                                 wp_class=gdb.WP_WRITE,
                                 internal=True)
+        self.breakpoints = breakpoints
         self.silent = True
         self.enabled = False
 
@@ -77,7 +78,7 @@ class NextInstrBreakpoint(gdb.Breakpoint):
             #print(f'py-bt {self.location}')
             gdb.execute('py-bt')
 
-        for brk in BREAKPOINTS:
+        for brk in self.breakpoints:
             brk.enabled = False
 
         return True
@@ -125,19 +126,25 @@ class EndStackFrameBreakpoint(gdb.Breakpoint):
         return False
 
 
-BREAKPOINTS = [NextInstrBreakpoint(location) for location in CASE_TARGET_LIST]
-BREAKPOINTS += [InitStackFrameBreakpoint(), EndStackFrameBreakpoint()]
-
-
 @gdb_command("py-step", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
-    for brk in BREAKPOINTS:
+    breakpoints = []
+    lst = [NextInstrBreakpoint(location, breakpoints) for location in CASE_TARGET_LIST]
+    lst += [InitStackFrameBreakpoint(), EndStackFrameBreakpoint()]
+    breakpoints[:] = lst
+
+    for brk in breakpoints:
         brk.enabled = True
     gdb.execute('continue')
 
 
 @gdb_command("py-reverse-step", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
 def invoke(cmd, args, from_tty):
-    for brk in BREAKPOINTS:
+    breakpoints = []
+    lst = [NextInstrBreakpoint(location, breakpoints) for location in CASE_TARGET_LIST]
+    lst += [InitStackFrameBreakpoint(), EndStackFrameBreakpoint()]
+    breakpoints[:] = lst
+
+    for brk in breakpoints:
         brk.enabled = True
     gdb.execute('reverse-continue')

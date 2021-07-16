@@ -1,6 +1,7 @@
+import warnings
 import dataclasses
-import logging
 
+import logging
 log = logging.getLogger(__name__)
 
 import yp
@@ -11,13 +12,14 @@ import gdb
 gdbenv = yp.gdbenv
 
 
-if False:
-    def get_current_pyframe():
-        return STACK[-1]
-else:
-    def get_current_pyframe():
-        frame: gdbenv.PyFrameObjectPtr = gdbenv.Frame.get_selected_python_frame().get_pyop()
-        return PyStackFrame.from_py_frame_object_ptr(frame)
+class NextInstrOptimizationWarning(RuntimeWarning):
+    pass
+
+warnings.simplefilter('once', NextInstrOptimizationWarning)
+
+def get_current_pyframe():
+    frame: gdbenv.PyFrameObjectPtr = gdbenv.Frame.get_selected_python_frame().get_pyop()
+    return PyStackFrame.from_py_frame_object_ptr(frame)
 
 
 @dataclasses.dataclass

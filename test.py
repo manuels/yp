@@ -8,7 +8,7 @@ PROMPT = '\(rr\) '
 class RRProcess:
     def __init__(self):
         args = '-o "-ex=set style enabled off"'
-        self.rr = pexpect.spawn(f'rr replay --gdb-x yp/main.py {args}', timeout=3)
+        self.rr = pexpect.spawn(f'yp replay {args}', timeout=3)
         self.rr.expect('--Type <RET> for more, q to quit, c to continue without paging--')
         self.rr.sendline('')
         self.rr.expect(PROMPT)

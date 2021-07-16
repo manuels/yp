@@ -1,5 +1,3 @@
-from pathlib import Path
-import warnings
 import logging
 
 log = logging.getLogger(__name__)
@@ -8,18 +6,6 @@ log.setLevel(logging.INFO)
 #log.debug = print
 
 STACK = []
-
-import yp
-import gdb
-gdbenv = yp.gdbenv
-
-from yp.gdb.breakpoints import UserInitStackFrameBreakpoint
-from yp.gdb.utils import gdb_command, gdb_escape, py_string
-
-class NextInstrOptimizationWarning(RuntimeWarning):
-    pass
-    
-warnings.simplefilter('once', NextInstrOptimizationWarning)
 
 """
 @gdb_command("py-foo", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)
@@ -33,40 +19,7 @@ def invoke(cmd, args, from_tty):
 """
 
 
-def ceval_case_target_lines():
-    contents = (Path(__file__).parent / 'ceval-py392.c').read_text().splitlines()
-    lines = [l for i, l in enumerate(contents)]
-    lineno_list = [i + 1 for i, l in enumerate(contents) if r'case TARGET(' in l]
-    assert len(lineno_list) > 0
-    return lineno_list
-
-# these `case` statements are all in _PyEval_EvalFrameDefault:
-CASE_TARGET_LIST = [f'../Python/ceval.c:{lineno}' for lineno in ceval_case_target_lines()]
-
-
 STEP_MODE = None
-
-
-@gdb_command("py-break", gdb.COMMAND_BREAKPOINTS, gdb.COMPLETE_LOCATION)
-def invoke(cmd, args, from_tty):
-    try:
-        filename, location = args.rstrip().rsplit(':')
-    except ValueError:
-        gdb.write('Expected py-break <script_file:lineno/function>\n')
-        return
-
-    where = f'$_streq({gdb_escape(filename)}, {py_string("co.co_filename")})'
-    
-    try:
-        lineno = int(location)
-    except ValueError:
-        func = location        
-        where += f' && $_streq({gdb_escape(func)}, {py_string("co.co_name")})'
-    else:
-        gdb.write('py-break only accepts function names (and no line numbers) right now.\n')
-        return
-
-    brk = UserInitStackFrameBreakpoint(where)
 
 '''
 @gdb_command("py-step-old", gdb.COMMAND_RUNNING, gdb.COMPLETE_NONE)

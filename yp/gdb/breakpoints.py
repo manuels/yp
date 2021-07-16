@@ -1,9 +1,4 @@
-import functools
-import gdb
-
-from yp.gdb.stack_frame import enter_frame, leave_frame, get_pygdb_selected_frame, get_current_pyframe
-from yp.gdb.utils import ExecDirection
-from yp.yp_gdb import STACK
+from pathlib import Path
 
 import logging
 log = logging.getLogger(__name__)
@@ -12,6 +7,19 @@ log = logging.getLogger(__name__)
 INIT_FRAME_LINE = '../Python/ceval.c:1324'  # in _PyEval_EvalFrameDefault: next_instr = first_instr;
 END_FRAME_LINE = '../Python/ceval.c:3844'   # in _PyEval_EvalFrameDefault: tstate->frame = f->f_back;
 
+
+def ceval_case_target_lines():
+    contents = (Path(__file__).parent / 'ceval-py392.c').read_text().splitlines()
+    lineno_list = [i + 1 for i, l in enumerate(contents) if r'case TARGET(' in l]
+    assert len(lineno_list) > 0
+    return lineno_list
+
+
+# these `case` statements are all in _PyEval_EvalFrameDefault:
+CASE_TARGET_LIST = [f'../Python/ceval.c:{lineno}' for lineno in ceval_case_target_lines()]
+
+'''
+this is old code:
 
 def gdb_breakpoint(func_or_line, cls=gdb.Breakpoint):
     def build_class(func):
@@ -66,19 +74,6 @@ class EndStackFrameBreakpoint(gdb.Breakpoint):
         return False
 
 
-class ConditionalBreakpoint(gdb.Breakpoint):
-    def __init__(self, position, condition=None):
-        gdb.Breakpoint.__init__ (self, position)
-        self.condition = condition
-
-    def should_stop(self):
-        if self.condition:
-            v = gdb.parse_and_eval(self.condition)
-            return v != 0
-        else:
-            return True
-
-
 @gdb_breakpoint
 def NextInstrBreakpoint(brk):
     global STEP_MODE
@@ -102,13 +97,15 @@ def NextInstrBreakpoint(brk):
     return ret
 
 
-@gdb_breakpoint(INIT_FRAME_LINE, cls=ConditionalBreakpoint)
-def UserInitStackFrameBreakpoint(brk):
-    if not brk.should_stop():
-        return False
+class ConditionalBreakpoint(gdb.Breakpoint):
+    def __init__(self, position, condition=None):
+        gdb.Breakpoint.__init__(self, position)
+        self.condition = condition
 
-    log.debug(f'stop UserInitStackFrameBreakpoint depth={len(STACK)} {get_current_pyframe()}')
-
-    gdb.execute('py-bt')
-
-    return True
+    def should_stop(self):
+        if self.condition:
+            v = gdb.parse_and_eval(self.condition)
+            return v != 0
+        else:
+            return True
+'''
