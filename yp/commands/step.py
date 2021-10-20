@@ -46,9 +46,9 @@ def is_at_new_line(state: InstrState):
     # it represents a jump backwards, update the frame's line
     # number and call the trace function.
     if    (direction.is_forward() and (lasti == state.instr_lb or lasti < state.instr_prev)) \
-       or (direction.is_reverse() and (lasti == state.instr_lb or lasti > state.instr_prev)):
-        filename = code.pyop_field('co_filename') or '?'
-        func = code.pyop_field('co_name') or '?'
+       or (direction.is_reverse() and (lasti == state.instr_lb or lasti < state.instr_prev)):
+        filename = code.pyop_field('co_filename') or '???'
+        func = code.pyop_field('co_name') or '???'
         location = (filename, func, state.f_lineno)
     else:
         location = None

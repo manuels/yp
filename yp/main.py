@@ -19,3 +19,5 @@ if __name__ == '__main__':
     import yp.commands.break_
     import yp.commands.next_
     import yp.commands.finish
+
+    # TODO: run 'set prompt (yp) '
